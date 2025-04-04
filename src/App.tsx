@@ -1,6 +1,6 @@
 import 'leaflet/dist/leaflet.css'
 import './App.css'
-import EquipmentMap from './components/positionMap'
+import EquipmentMap from './components/EquipmentMap'
 
 
 
