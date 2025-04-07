@@ -2,7 +2,8 @@ import { useEffect, useState, useRef } from "react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { Button, Spinner } from "react-bootstrap";
+import { Spinner } from "react-bootstrap";
+import EquipmentStateHistory from "./EquipmentStateHistory";
 
 // Tipos de dados
 interface Equipment {
@@ -12,7 +13,7 @@ interface Equipment {
 
 interface EquipmentPosition {
   equipmentId: string;
-  positions: { lat: number; lon: number; date: string; equipmentStateId?: string }[];
+  positions: { lat: number; lon: number; date: string }[];
 }
 
 interface EquipmentState {
@@ -21,29 +22,97 @@ interface EquipmentState {
   color: string;
 }
 
+interface EquipmentStateHistory {
+  equipmentId: string;
+  states: { date: string; equipmentStateId: string }[];
+}
+
 // Ícone personalizado para o marcador
 const customIcon = new L.Icon({
-  iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-  iconSize: [25, 41], // tamanho do ícone
-  iconAnchor: [12, 41], // ponto do ícone que corresponderá à posição do marcador
+  iconUrl:
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
 });
 
 const EquipmentMap = () => {
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [positions, setPositions] = useState<EquipmentPosition[]>([]);
-  const [states, setStates] = useState<EquipmentState[]>([]); // Adicionado para armazenar os estados
+  const [states, setStates] = useState<EquipmentState[]>([]);
+  const [stateHistory, setStateHistory] = useState<EquipmentStateHistory[]>([]);
   const [loading, setLoading] = useState(true);
-  const mapRef = useRef<L.Map | null>(null); // Referência ao mapa
+  const [selectedEquipment, setSelectedEquipment] = useState<{
+    name: string;
+    history: { date: string; stateName: string; color: string }[];
+  } | null>(null); // Estado para o equipamento selecionado
+  
+  const mapRef = useRef<L.Map | null>(null); // Referência para o mapa
 
   useEffect(() => {
-    // Simulando a busca dos dados
     setTimeout(() => {
-      import("../data/equipment.json").then((data) => setEquipment(data.default));
-      import("../data/equipmentPositionHistory.json").then((data) => setPositions(data.default));
-      import("../data/equipmentState.json").then((data) => setStates(data.default)); // Importa os estados
+      import("../data/equipment.json").then((data) => {
+        console.log("Equipment data:", data.default);
+        setEquipment(data.default);
+      });
+      import("../data/equipmentPositionHistory.json").then((data) => {
+        console.log("Position data:", data.default);
+        setPositions(data.default);
+      });
+      import("../data/equipmentState.json").then((data) => {
+        console.log("State data:", data.default);
+        setStates(data.default);
+      });
+      import("../data/equipmentStateHistory.json").then((data) => {
+        console.log("State history data:", data.default);
+        setStateHistory(data.default);
+      });
       setLoading(false);
     }, 1000);
   }, []);
+
+  useEffect(() => {
+    if (positions.length > 0 && mapRef.current) {
+      // Calcula os limites (bounds) com base nas posições dos equipamentos
+      const bounds = L.latLngBounds(
+        positions.flatMap((pos) =>
+          pos.positions.map((p) => [p.lat, p.lon] as [number, number])
+        )
+      );
+      mapRef.current.fitBounds(bounds); // Ajusta o mapa para mostrar todos os marcadores
+    }
+  }, [positions]); // Executa quando as posições são carregadas
+
+  const handleMarkerClick = (equipmentId: string) => {
+    const equipmentName =
+      equipment.find((eq) => eq.id === equipmentId)?.name ??
+      "Equipamento Desconhecido";
+    const equipmentStateHistory = stateHistory.find(
+      (history) => history.equipmentId === equipmentId
+    );
+
+    const history = equipmentStateHistory
+      ? equipmentStateHistory.states
+          .map((state) => {
+            const matchedState = states.find(
+              (s) => s.id === state.equipmentStateId
+            );
+            return {
+              date: state.date,
+              stateName: matchedState?.name ?? "Desconhecido",
+              color: matchedState?.color ?? "#000",
+            };
+          })
+          .sort(
+            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+          ) // Ordenar por data
+      : [];
+
+    setSelectedEquipment({ name: equipmentName, history });
+  };
+
+  const handleCloseModal = () => {
+    setSelectedEquipment(null); // Limpa o equipamento selecionado ao fechar o modal
+  };
 
   if (loading) {
     return <Spinner animation="border" className="m-3" />;
@@ -52,52 +121,106 @@ const EquipmentMap = () => {
   return (
     <div className="container mt-4">
       <h2 className="mb-3">Mapa de Equipamentos</h2>
-      <MapContainer center={[-19.126536, -42.947756]} zoom={10} style={{ height: "500px", width: "100%" }}>
+      <MapContainer
+        center={[-19.126536, -42.947756]}
+        zoom={10}
+        style={{ height: "500px", width: "100%" }}
+        ref={mapRef} // Adiciona a referência ao mapa
+      >
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
         {positions.map((pos) => {
-          // Ordena as posições pela data (mais recente primeiro)
-          const sortedPositions = pos.positions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          // Pega a última posição
+          const sortedPositions = pos.positions.sort(
+            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+          );
           const lastPosition = sortedPositions[0];
 
-          // Pega o equipamento correspondente
-          const matchedEquipment = equipment.find((eq) => eq.id === pos.equipmentId);
-
-          // Pega o estado correspondente usando equipmentStateId
-          const matchedState = states.find((state) => state.id === lastPosition?.equipmentStateId);
-
           return lastPosition ? (
-            <Marker key={pos.equipmentId} position={[lastPosition.lat, lastPosition.lon]} icon={customIcon}>
+            <Marker
+              key={pos.equipmentId}
+              position={[lastPosition.lat, lastPosition.lon]}
+              icon={customIcon}
+              eventHandlers={{
+                click: () => handleMarkerClick(pos.equipmentId), // Abre o modal ao clicar no marcador
+              }}
+            >
               <Popup>
-                <strong>{matchedEquipment?.name ?? "Equipamento Desconhecido"}</strong> <br />
-                Última posição registrada: {new Date(lastPosition.date).toLocaleString()} <br />
-                Estado atual:{" "}
-                <span style={{ color: matchedState?.color ?? "#000" }}>
-                  {matchedState?.name ?? "Desconhecido"}
-                </span>
+                <strong>
+                  {equipment.find((eq) => eq.id === pos.equipmentId)?.name ??
+                    "Equipamento Desconhecido"}
+                </strong>{" "}
+                <br />
+                Última posição registrada:{" "}
+                {new Date(lastPosition.date).toLocaleString()}
+                <br />
+                Último estado:{" "}
+                {(() => {
+                  const equipmentStateHistory = stateHistory.find(
+                    (history) => history.equipmentId === pos.equipmentId
+                  );
+                  if (equipmentStateHistory) {
+                    const lastState = equipmentStateHistory.states.sort(
+                      (a, b) =>
+                        new Date(b.date).getTime() - new Date(a.date).getTime()
+                    )[0];
+                    const matchedState = states.find(
+                      (state) => state.id === lastState?.equipmentStateId
+                    );
+                    return matchedState?.name ?? "Desconhecido";
+                  }
+                  return "Desconhecido";
+                })()}
               </Popup>
             </Marker>
           ) : null;
         })}
       </MapContainer>
-      <Button
-        variant="primary"
-        className="mt-3"
-        onClick={() => {
-          if (positions.length > 0) {
-            const firstEquipmentPosition = positions[0];
-            const firstPosition = firstEquipmentPosition.positions[0];
-            if (firstPosition && mapRef.current) {
-              mapRef.current.setView([firstPosition.lat, firstPosition.lon], 15);
-            }
-          }
-        }}
-      >
-        Ir para o primeiro equipamento
-      </Button>
+     {/* Relação do maquinário e seu último estado */}
+<div className="mt-4">
+  <h3>Relação do Maquinário</h3>
+  <table className="table table-striped">
+    <thead>
+      <tr>
+        <th>Equipamento</th>
+        <th>Último Estado</th>
+      </tr>
+    </thead>
+    <tbody>
+      {equipment.map((eq) => {
+        const equipmentStateHistory = stateHistory.find(
+          (history) => history.equipmentId === eq.id
+        );
+        const lastState = equipmentStateHistory
+          ? equipmentStateHistory.states.sort(
+              (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+            )[0]
+          : null;
+        const matchedState = lastState
+          ? states.find((state) => state.id === lastState.equipmentStateId)
+          : null;
+
+        return (
+          <tr key={eq.id}>
+            <td>{eq.name}</td>
+            <td>{matchedState?.name ?? "Estado Desconhecido"}</td>
+          </tr>
+        );
+      })}
+    </tbody>
+  </table>
+</div>
+
+      {/* Modal para exibir o histórico de estados */}
+      {selectedEquipment && (
+        <EquipmentStateHistory
+          show={!!selectedEquipment}
+          onHide={handleCloseModal}
+          equipmentName={selectedEquipment.name}
+          stateHistory={selectedEquipment.history}
+        />
+      )}
     </div>
   );
 };
